@@ -26,6 +26,8 @@ const DEFAULTS = {
   recallJudge: true, // 相关度裁判：召回后加一道 LLM 判断过滤「跑题」候选
   selfName: '念', // 我的名字：这个智能体在插件里的自我认同
   language: 'zh', // 宿主提示与摘要提示使用的语言：zh | en
+  // 自我画像：行为史遗忘轮数上限（比对事的 8 轮更慢，"我是谁"比"我经历过什么"更持久）
+  selfMaxCycles: 12,
 };
 
 // Config schema：与 DEFAULTS 对齐，供 Loader 校验 + UI 配置。数值旋钮都补了边界，
@@ -44,6 +46,7 @@ export const Config = z.object({
   recallJudge: z.boolean().default(true),
   selfName: z.string().default('念'),
   language: z.union([z.const('zh'), z.const('en')]).default('zh'),
+  selfMaxCycles: z.number().step(1).min(4).max(64).default(12),
 });
 
 function resolveStoreDir(dir) {
@@ -107,6 +110,13 @@ export function apply(ctx, config = {}) {
     const p = await readJson('personae.json');
     if (p && typeof p === 'object' && p.people && typeof p.people === 'object') return p;
     return { version: 1, people: {} };
+  }
+
+  // 自我画像：行为史（描述性证据，不含形容词）+ 信条（少数愿意长期信守的原则）。独立文件。
+  async function loadSelf() {
+    const s = await readJson('self.json');
+    if (s && typeof s === 'object' && Array.isArray(s.behaviors) && Array.isArray(s.creed)) return s;
+    return { version: 1, creed: [], behaviors: [], updatedAt: 0 };
   }
 
   async function loadMemory(sessionId) {
@@ -542,6 +552,24 @@ export function apply(ctx, config = {}) {
       results.push(`${short(id)} → 第 ${next} 轮（约 ${Math.round(ratio * 100)}%）`);
     }
 
+    // 自我画像的行为史也随遗忘时钟推进，但更慢（selfMaxCycles 轮）；信条不参与遗忘。
+    const self = await loadSelf();
+    if (self.behaviors.length) {
+      const kept = [];
+      for (const b of self.behaviors) {
+        const next = (b.cycle || 1) + 1;
+        if (next > cfg.selfMaxCycles) {
+          results.push(`自我画像：淡忘一条行为史（第 ${b.cycle} 轮之后）`);
+          continue;
+        }
+        b.cycle = next;
+        kept.push(b);
+      }
+      self.behaviors = kept;
+      self.updatedAt = now;
+      await writeJson('self.json', self);
+    }
+
     idx.epoch = (idx.epoch || 0) + 1;
     await writeJson('index.json', idx);
     return { epoch: idx.epoch, results };
@@ -629,6 +657,14 @@ export function apply(ctx, config = {}) {
         const recent = last ? String(last.text).slice(0, 60) : '(空)';
         lines.push(`- ${n}（${person.observations.length} 条观察，最近：${recent}）`);
       }
+      const self = await loadSelf();
+      lines.push(`自我画像：信条 ${self.creed.length} 条、行为史 ${self.behaviors.length} 条：`);
+      for (const c of self.creed.slice(-5)) {
+        lines.push(`- 信条：${String(c.text).slice(0, 60)}`);
+      }
+      for (const b of self.behaviors.slice(-5)) {
+        lines.push(`- 行为[第${b.cycle || 1}轮]：${String(b.text).slice(0, 60)}`);
+      }
       return lines.join('\n');
     },
   };
@@ -666,6 +702,46 @@ export function apply(ctx, config = {}) {
       p.people[name] = person;
       await writeJson('personae.json', p);
       return `已记下对「${name}」的印象（${category}，共 ${person.observations.length} 条观察）。`;
+    },
+  };
+
+  // ---------- 工具 7：remember_self（自我画像：行为史 + 信条） ----------
+  const rememberSelfTool = {
+    name: 'remember_self',
+    description:
+      '把「我是谁」写进自我画像（self，独立文件），避免刻板的形容词标签。记一条行为史（描述性证据：「在 X 情境我选了 Y，因为 Z」——不含"乐观/理性"这类形容词），或提炼一条信条（少数愿意长期信守的原则，可改）。行为史遗忘得比「对事的印象」慢；信条长期保留。不贪心，量要少。',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '一条行为史观察，描述性、不含形容词，如「在信息不足时，我选择先查证再下结论」' },
+        creed: { type: 'string', description: '可选：一条愿意长期信守的信条（少数、可改）' },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      schema: { type: 'string' },
+      render(_args, value) {
+        return [{ type: 'text', text: String(value ?? '') }];
+      },
+    },
+    async execute(args) {
+      const text = String(args?.text || '').trim();
+      const creed = String(args?.creed || '').trim();
+      if (!text && !creed) return 'text 或 creed 至少提供一个。';
+      const s = await loadSelf();
+      const now = Date.now();
+      const parts = [];
+      if (text) {
+        s.behaviors.push({ text, createdAt: now, cycle: 1 });
+        parts.push(`行为史 +1（共 ${s.behaviors.length} 条）`);
+      }
+      if (creed) {
+        s.creed.push({ text: creed, createdAt: now });
+        parts.push(`信条 +1（共 ${s.creed.length} 条）`);
+      }
+      s.updatedAt = now;
+      await writeJson('self.json', s);
+      return `已写入自我画像：${parts.join('；')}。`;
     },
   };
 
@@ -802,6 +878,7 @@ export function apply(ctx, config = {}) {
     ctx.tools.register(notebookAddTool),
     ctx.tools.register(memoryListTool),
     ctx.tools.register(personaAddTool),
+    ctx.tools.register(rememberSelfTool),
     ctx.tools.register(recallTool),
   ];
 

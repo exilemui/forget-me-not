@@ -80,7 +80,9 @@ Once published to npm, `plugin_manager install_bundle` installs the package dire
 | `decay` | Advance the forgetting clock: seal the current session + advance every old memory one round |
 | `recall` | Recall: retrieve old memories by query (with relevance judging), write hits back to the current session's memory file |
 | `notebook_add` | Add a line to the notebook (long-term, never forgotten) |
-| `memory_list` | List all memories (round / category / preview) + the notebook |
+| `persona_add` | Record an impression of a person (user profile, separate file, append-only) |
+| `remember_self` | Record a behavior-history entry or a creed into the "self-image" (no stereotyped adjective labels) |
+| `memory_list` | List all memories (round / category / preview) + the notebook + personae + self-image |
 
 ---
 
@@ -102,6 +104,7 @@ All fields are editable in the DeepSeek Harness plugin settings UI (sidebar "for
 | `recallJudge` | `true` | Relevance judge: after recall, run an LLM pass to filter "off-topic" candidates |
 | `selfName` | `念` | My name: the agent's self-identity in the plugin (I tell people my name and ask what to call them) |
 | `language` | `zh` | Host prompt language: `zh` / `en` |
+| `selfMaxCycles` | `12` | Max forgetting rounds for the self-image behavior history (slower than the 8 for events; "who I am" outlasts "what I did") |
 
 ---
 
