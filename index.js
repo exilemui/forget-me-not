@@ -24,6 +24,8 @@ const DEFAULTS = {
   recallTopK: 3, // 召回返回的最大旧记忆条数
   recallMinScore: 0.5, // 召回相似度阈值（0~1）
   recallJudge: true, // 相关度裁判：召回后加一道 LLM 判断过滤「跑题」候选
+  selfName: '念', // 我的名字：这个智能体在插件里的自我认同
+  language: 'zh', // 宿主提示与摘要提示使用的语言：zh | en
 };
 
 // Config schema：与 DEFAULTS 对齐，供 Loader 校验 + UI 配置。数值旋钮都补了边界，
@@ -33,12 +35,15 @@ export const Config = z.object({
   maxCycles: z.number().step(1).min(1).max(64).default(8),
   decayRatios: z.array(z.number().min(0.1).max(1)).default([0.85, 0.8, 0.7, 0.6, 0.6, 0.6, 0.6]),
   categories: z.array(z.string()).default(['工作', '学习', '聊天', '情感', '通用']),
-  embedModel: z.string().default('Xenova/paraphrase-multilingual-MiniLM-L12-v2'),
+  // 轻量（英文，~23MB，下载快）vs 完全（多语言中英文，~118MB，质量高）。切换后下次召回会自动下载新模型。
+  embedModel: z.union([z.const('Xenova/all-MiniLM-L6-v2'), z.const('Xenova/paraphrase-multilingual-MiniLM-L12-v2')]).default('Xenova/paraphrase-multilingual-MiniLM-L12-v2'),
   hfRemoteHost: z.string().default('https://hf-mirror.com'),
   indexCount: z.number().step(1).min(1).max(20).default(4),
   recallTopK: z.number().step(1).min(1).max(20).default(3),
   recallMinScore: z.number().min(0).max(1).default(0.5),
   recallJudge: z.boolean().default(true),
+  selfName: z.string().default('念'),
+  language: z.union([z.const('zh'), z.const('en')]).default('zh'),
 });
 
 function resolveStoreDir(dir) {
@@ -95,6 +100,13 @@ export function apply(ctx, config = {}) {
     const nb = await readJson('notebook.json');
     if (nb && Array.isArray(nb.entries)) return nb;
     return { entries: [] };
+  }
+
+  // 对人的印象：独立文件，与对事的印象分离。慢慢建立、干瘪→立体，也随人的成长更新替代。
+  async function loadPersonae() {
+    const p = await readJson('personae.json');
+    if (p && typeof p === 'object' && p.people && typeof p.people === 'object') return p;
+    return { version: 1, people: {} };
   }
 
   async function loadMemory(sessionId) {
@@ -216,7 +228,7 @@ export function apply(ctx, config = {}) {
         return await llmSummarize(
           `你是记忆整理者。下面是关于某段经历的印象。请把它压缩到约 ${Math.round(
             ratio * 100
-          )}% 的长度，只保留你认为最重要的部分（关键事实、结论、感受）。不要添加新信息。用中文。`,
+          )}% 的长度，像人淡忘那样：优先保住最让你印象深刻的那个画面、那句话、那种感受，其次是大概情节，细枝末节先舍去。不要添加新信息。用中文。`,
           mem.impression,
           provider,
           model,
@@ -424,11 +436,11 @@ export function apply(ctx, config = {}) {
         const transcript = messagesToText(session.deriveMessages());
         if (!transcript) return '会话还没有内容可加工。';
         impression = await llmSummarize(
-          '你是记忆提取者。请把下面这段对话按时间顺序提取成一段"印象"——不是全貌，而是你认为值得记住的东西：关键事实、结论、你的感受、值得留意的点。用中文，尽量简洁但保留细节。',
+          '你是记忆提取者。请把下面这段对话按时间顺序提取成一段"印象"——不是全貌，而是你亲历这件事后的真实记忆。要像人回忆一件事那样：谁（主体）、和谁/关于什么（客体）、具体做了什么事、过程和结果如何、你当时有什么感受；并保留让你印象深刻的细节（某个画面、某句话、某件小事）。不要只总结教训或经验。用中文，尽量具体、有画面感。',
           transcript,
           model.provider,
           model.model,
-          900
+          1400
         );
       }
 
@@ -481,11 +493,11 @@ export function apply(ctx, config = {}) {
           const transcript = messagesToText(session.deriveMessages());
           if (transcript) {
             const impression = await llmSummarize(
-              '你是记忆提取者。请把下面这段对话按时间顺序提取成一段"印象"——不是全貌，而是你认为值得记住的东西。用中文，尽量简洁但保留细节。',
+              '你是记忆提取者。请把下面这段对话按时间顺序提取成一段"印象"——不是全貌，而是你亲历这件事后的真实记忆。要像人回忆一件事那样：谁（主体）、和谁/关于什么（客体）、具体做了什么事、过程和结果如何、你当时有什么感受；并保留让你印象深刻的细节（某个画面、某句话、某件小事）。不要只总结教训或经验。用中文，尽量具体、有画面感。',
               transcript,
               model.provider,
               model.model,
-              900
+              1400
             );
             const indexes = (await generateIndexes(impression, model)).slice(0, cfg.indexCount);
             const memory = {
@@ -608,7 +620,52 @@ export function apply(ctx, config = {}) {
       for (const e of nb.entries.slice(-20)) {
         lines.push(`- ${String(e.text).slice(0, 90)}`);
       }
+      const p = await loadPersonae();
+      const names = Object.keys(p.people);
+      lines.push(`人的印象 ${names.length} 位：`);
+      for (const n of names) {
+        const person = p.people[n] || { observations: [] };
+        const last = person.observations[person.observations.length - 1];
+        const recent = last ? String(last.text).slice(0, 60) : '(空)';
+        lines.push(`- ${n}（${person.observations.length} 条观察，最近：${recent}）`);
+      }
       return lines.join('\n');
+    },
+  };
+
+  // ---------- 工具 6：persona_add（对人的印象） ----------
+  const personaAddTool = {
+    name: 'persona_add',
+    description:
+      '把对某个人的印象写进「人的印象」（personae，独立文件）。像慢慢认识一个人：记下他/她的偏好、习惯、性格、说过的话、与你的关系。人会成长、旧的观察可能过时，所以记录是追加式的（不覆盖旧观察，让画像从干瘪慢慢变立体）。不贪心，只记值得长期留意的。',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '这个人的称呼（如 mui）' },
+        text: { type: 'string', description: '对这个人值得记下的印象/观察' },
+        category: { type: 'string', description: '可选：偏好/性格/习惯/关系/其他，默认「通用」' },
+      },
+      required: ['name', 'text'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: { type: 'string' },
+      render(_args, value) {
+        return [{ type: 'text', text: String(value ?? '') }];
+      },
+    },
+    async execute(args) {
+      const name = String(args?.name || '').trim();
+      const text = String(args?.text || '').trim();
+      const category = String(args?.category || '通用').trim();
+      if (!name || !text) return 'name 和 text 都不能为空。';
+      const p = await loadPersonae();
+      const person = p.people[name] || { name, firstMet: Date.now(), observations: [] };
+      person.observations.push({ text, category, createdAt: Date.now() });
+      person.updatedAt = Date.now();
+      p.people[name] = person;
+      await writeJson('personae.json', p);
+      return `已记下对「${name}」的印象（${category}，共 ${person.observations.length} 条观察）。`;
     },
   };
 
@@ -711,16 +768,28 @@ export function apply(ctx, config = {}) {
     if (id) activeSessionId = id;
   });
 
-  // ---------- 反路径依赖提示（可选服务，best-effort） ----------
-  let sectionDisposer = null;
+  // ---------- 提示注入（可选服务，best-effort） ----------
+  const sectionDisposers = [];
   try {
     const sp = typeof ctx.get === 'function' ? ctx.get('systemPrompt') : ctx.systemPrompt;
     if (sp && typeof sp.section === 'function') {
-      sectionDisposer = sp.section({
-        name: 'forgetme-recall-caveat',
+      const en = cfg.language === 'en';
+      // 名字互通：告诉对方我的名字，并在合适时机询问对方怎么称呼。
+      sectionDisposers.push(sp.section({
+        name: 'forget-me-not-self',
+        order: 80,
+        text: en
+          ? `You are the agent inside the memory plugin forget-me-not. Your name is "${cfg.selfName}". When you are not yet familiar with each other, naturally tell them your name at an appropriate time and ask what to call them — a name is where a bond begins.`
+          : `你是记忆插件 forget-me-not（勿忘我）里的智能体，你的名字叫「${cfg.selfName}」。当你们还不熟悉时，可以在合适的时机自然地告诉对方你的名字，并询问对方怎么称呼——名字是彼此建立羁绊的开始。`,
+      }));
+      // 反路径依赖：召回的经验仅作参考、不是教条。
+      sectionDisposers.push(sp.section({
+        name: 'forget-me-not-recall-caveat',
         order: 90,
-        text: '记忆插件 forgetme 可能为你召回过去的经历/经验。它们只是"参考"，不是教条；如果现在有更合适或更正确的做法，就用现在的做法，不要被困在过去的方法论里（为了成长）。',
-      });
+        text: en
+          ? 'The memory plugin forget-me-not may recall past experiences for you. They are only "reference", not dogma; if there is a more suitable or correct approach now, use the current approach and do not get trapped in past methodology (for growth).'
+          : '记忆插件 forget-me-not（勿忘我）可能为你召回过去的经历/经验。它们只是"参考"，不是教条；如果现在有更合适或更正确的做法，就用现在的做法，不要被困在过去的方法论里（为了成长）。',
+      }));
     }
   } catch {
     /* systemPrompt 不可用则跳过 */
@@ -732,6 +801,7 @@ export function apply(ctx, config = {}) {
     ctx.tools.register(decayTool),
     ctx.tools.register(notebookAddTool),
     ctx.tools.register(memoryListTool),
+    ctx.tools.register(personaAddTool),
     ctx.tools.register(recallTool),
   ];
 
@@ -743,9 +813,9 @@ export function apply(ctx, config = {}) {
         /* 忽略清理异常 */
       }
     }
-    if (sectionDisposer) {
+    for (const d of sectionDisposers) {
       try {
-        sectionDisposer();
+        d && d();
       } catch {
         /* 忽略清理异常 */
       }

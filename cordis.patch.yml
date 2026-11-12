@@ -1,4 +1,4 @@
 - insert:
-    - id: forgetme
-      name: '@local/forgetme'
+    - id: forget-me-not
+      name: '@local/forget-me-not'
       config: {}
