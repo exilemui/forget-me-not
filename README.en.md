@@ -4,7 +4,7 @@ A "human-forgetting" memory plugin for DeepSeek Harness agents.
 
 It does not try to remember everything — instead it **forgets in a disciplined way**. Like a human, it distills experience into impressions, lets them fade over time, and eventually forgets them entirely. At the same time, it keeps a "notebook" for the things truly worth remembering long-term.
 
-**New in v2.0**: a DSH sidebar entry (forget-me-not flower icon + settings page), Chinese/English switching, lightweight/full embedding model selection, and "exchange names" (I'm called "念" / Nian, and I'll ask what to call you).
+**New in v2.0**: a DSH sidebar entry (forget-me-not flower icon + settings page), Chinese/English switching, lightweight/full embedding model selection, and "exchange names" (set your name and the AI's name in settings — both optional).
 
 > 中文：[README.md](./README.md)
 
@@ -62,7 +62,7 @@ Triggers:
 
    This installs `@xenova/transformers` (the local embedding runtime) into `node_modules/` and builds `sharp` automatically (`package.json` declares `pnpm.onlyBuiltDependencies: ["sharp"]`).
 
-3. On the first `recall` call, the embedding model (default multilingual, ~118MB) is downloaded once and cached locally under `~/.forgetme/models/`; from then on all inference is local. You can switch to the lightweight English model (~23MB) in settings.
+3. On the first `recall` call, the embedding model (default multilingual, ~118MB) is downloaded once and cached locally under `~/.forget-me-not/models/`; from then on all inference is local. You can switch to the lightweight English model (~23MB) in settings.
 
 ### Method 2: npm release (later)
 
@@ -92,7 +92,7 @@ All fields are editable in the DeepSeek Harness plugin settings UI (sidebar "for
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `storeDir` | `~/.forgetme/rememberme` | Memory storage directory (memory data is private; keep it out of Git) |
+| `storeDir` | `~/.forget-me-not/rememberme` | Memory storage directory (memory data is private; keep it out of Git) |
 | `maxCycles` | `8` | Max forgetting rounds; beyond this the file is deleted |
 | `decayRatios` | `[0.85, 0.8, 0.7, 0.6, 0.6, 0.6, 0.6]` | Retention ratios for rounds 2–8 |
 | `categories` | `['工作','学习','聊天','情感','通用']` | Initial categories; add/remove as needed |
@@ -102,7 +102,8 @@ All fields are editable in the DeepSeek Harness plugin settings UI (sidebar "for
 | `recallTopK` | `3` | Max old memories returned by recall |
 | `recallMinScore` | `0.5` | Recall similarity threshold (0–1) |
 | `recallJudge` | `true` | Relevance judge: after recall, run an LLM pass to filter "off-topic" candidates |
-| `selfName` | `念` | My name: the agent's self-identity in the plugin (I tell people my name and ask what to call them) |
+| `agentName` | `''` | The AI's name (if empty, it won't proactively introduce itself by name) |
+| `userName` | `''` | Your name (if empty, it won't proactively ask) |
 | `language` | `zh` | Host prompt language: `zh` / `en` |
 | `selfMaxCycles` | `12` | Max forgetting rounds for the self-image behavior history (slower than the 8 for events; "who I am" outlasts "what I did") |
 
@@ -111,7 +112,7 @@ All fields are editable in the DeepSeek Harness plugin settings UI (sidebar "for
 ## Storage Layout
 
 ```
-~/.forgetme/
+~/.forget-me-not/
 ├── rememberme/
 │   ├── index.json        # forgetting clock + index of all memories (round/category/time)
 │   ├── notebook.json     # notebook (long-term, never forgotten)
@@ -125,7 +126,7 @@ All fields are editable in the DeepSeek Harness plugin settings UI (sidebar "for
 ## Notes
 
 - **sharp native library**: `@xenova/transformers` depends on `sharp` (only used for image models; this plugin only does text embedding and does not need it). pnpm skips build scripts by default, but `package.json` declares `pnpm.onlyBuiltDependencies: ["sharp"]`, so `pnpm install` builds sharp automatically. If the sharp build fails, text recall falls back to character 2-gram overlap matching (it won't crash, only semantic precision drops).
-- **Model download**: the first `recall` downloads the embedding model (default ~118MB), then caches it locally under `~/.forgetme/models/` — all inference is local, and your data never leaves the machine. If huggingface.co is unreachable, it falls back to the `hf-mirror.com` mirror (configurable via `hfRemoteHost`).
+- **Model download**: the first `recall` downloads the embedding model (default ~118MB), then caches it locally under `~/.forget-me-not/models/` — all inference is local, and your data never leaves the machine. If huggingface.co is unreachable, it falls back to the `hf-mirror.com` mirror (configurable via `hfRemoteHost`).
 - **Reasoning-model budget**: summarization / indexing / judging via `llm.stream` automatically lowers `reasoningEffort` to the model's lowest advertised tier (excluding `off`), so DeepSeek reasoning models don't burn the whole `maxTokens` budget on thinking and produce empty text.
 
 ---

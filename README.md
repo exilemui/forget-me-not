@@ -4,7 +4,7 @@
 
 它不追求把一切都记住，而是**有节制地遗忘**——像人一样，把经历蒸馏成印象，随时间淡忘，最后彻底遗忘。同时，它保留「笔记本」，让真正刻骨铭心的东西长久留存。
 
-**v2.0 新增**：DSH 侧边栏入口（勿忘我花图标 + 设置页）、中英文切换、embedding 模型轻量/完全可切换、「互相告知名字」（我叫「念」，也会问你怎么称呼）。
+**v2.0 新增**：DSH 侧边栏入口（勿忘我花图标 + 设置页）、中英文切换、embedding 模型轻量/完全可切换、「互相告知名字」（在设置里自定义你的名字和 AI 的名字，均可留空）。
 
 > English: [README.en.md](./README.en.md)
 
@@ -62,7 +62,7 @@ forget-me-not 把这两点落到工程上：
 
    这会把 `@xenova/transformers`（本地向量模型运行时）装进 `node_modules/`，并自动构建 `sharp`（`package.json` 里已声明 `pnpm.onlyBuiltDependencies: ["sharp"]`）。
 
-3. 首次调用 `recall` 时，会联网下载一次 embedding 模型（默认多语言模型约 118MB）并缓存到本地 `~/.forgetme/models/`，之后全程本地推理。可在配置里切到轻量英文模型（约 23MB）。
+3. 首次调用 `recall` 时，会联网下载一次 embedding 模型（默认多语言模型约 118MB）并缓存到本地 `~/.forget-me-not/models/`，之后全程本地推理。可在配置里切到轻量英文模型（约 23MB）。
 
 ### 方式二：npm 发布版（后续）
 
@@ -92,7 +92,7 @@ forget-me-not 把这两点落到工程上：
 
 | 键 | 默认 | 说明 |
 |----|------|------|
-| `storeDir` | `~/.forgetme/rememberme` | 记忆存储目录（记忆数据属隐私，不进 Git） |
+| `storeDir` | `~/.forget-me-not/rememberme` | 记忆存储目录（记忆数据属隐私，不进 Git） |
 | `maxCycles` | `8` | 遗忘轮数上限，超过即删除 |
 | `decayRatios` | `[0.85, 0.8, 0.7, 0.6, 0.6, 0.6, 0.6]` | 第 2~8 轮保留比例 |
 | `categories` | `['工作','学习','聊天','情感','通用']` | 初步分类，按需增删 |
@@ -102,7 +102,8 @@ forget-me-not 把这两点落到工程上：
 | `recallTopK` | `3` | 召回返回的最大旧记忆条数 |
 | `recallMinScore` | `0.5` | 召回相似度阈值（0~1） |
 | `recallJudge` | `true` | 相关度裁判：召回后加一道 LLM 判断过滤「跑题」候选 |
-| `selfName` | `念` | 我的名字：智能体在插件里的自我认同（会主动告诉对方名字并问怎么称呼） |
+| `agentName` | `''` | AI 的名字（留空则不主动自报名字） |
+| `userName` | `''` | 用户的名字（留空则不主动询问） |
 | `language` | `zh` | 宿主提示语言：`zh` / `en` |
 | `selfMaxCycles` | `12` | 自我画像的行为史遗忘轮数上限（比对事的 8 轮更慢，"我是谁"更持久） |
 
@@ -111,7 +112,7 @@ forget-me-not 把这两点落到工程上：
 ## 存储结构
 
 ```
-~/.forgetme/
+~/.forget-me-not/
 ├── rememberme/
 │   ├── index.json        # 遗忘时钟 + 所有记忆的索引（轮数/分类/时间）
 │   ├── notebook.json     # 笔记本（长期保存，不遗忘）
@@ -125,7 +126,7 @@ forget-me-not 把这两点落到工程上：
 ## 注意事项
 
 - **sharp 原生库**：`@xenova/transformers` 依赖 `sharp`（仅用于图像模型，本插件只做文本嵌入不需要它）。pnpm 默认不跑构建脚本，但 `package.json` 已声明 `pnpm.onlyBuiltDependencies: ["sharp"]`，`pnpm install` 会自动构建 sharp。若 sharp 构建失败，文本召回会自动回退到字符 2-gram 重叠匹配（不会崩溃，只是语义精度下降）。
-- **模型下载**：首次 `recall` 会联网下载 embedding 模型（默认约 118MB），之后缓存到本地 `~/.forgetme/models/`，全程本地推理，隐私不出本机。若 huggingface.co 不可达，会自动走 `hf-mirror.com` 镜像（可在配置里改 `hfRemoteHost`）。
+- **模型下载**：首次 `recall` 会联网下载 embedding 模型（默认约 118MB），之后缓存到本地 `~/.forget-me-not/models/`，全程本地推理，隐私不出本机。若 huggingface.co 不可达，会自动走 `hf-mirror.com` 镜像（可在配置里改 `hfRemoteHost`）。
 - **推理模型预算**：摘要/索引/裁判用 `llm.stream` 时会自动把 `reasoningEffort` 降到模型宣传的最低档（排除 `off`），避免 DeepSeek 推理模型把整个 `maxTokens` 预算耗在思考上、产出空正文。
 
 ---

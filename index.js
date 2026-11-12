@@ -8,7 +8,7 @@ export const inject = ['sessions', 'llm', 'tools'];
 
 // 可调默认值；Config schema 让它们能在 cordis.patch.yml / UI 里改。
 const DEFAULTS = {
-  // '' 表示用 ~/.forgetme/rememberme
+  // '' 表示用 ~/.forget-me-not/rememberme
   storeDir: '',
   // 遗忘轮数上限：第 8 轮后彻底遗忘（删除文件）
   maxCycles: 8,
@@ -24,7 +24,8 @@ const DEFAULTS = {
   recallTopK: 3, // 召回返回的最大旧记忆条数
   recallMinScore: 0.5, // 召回相似度阈值（0~1）
   recallJudge: true, // 相关度裁判：召回后加一道 LLM 判断过滤「跑题」候选
-  selfName: '念', // 我的名字：这个智能体在插件里的自我认同
+  agentName: '', // AI 名：用户给这个智能体起的名字（可留空，留空则不注入固定名字）
+  userName: '', // 用户名：用户怎么称呼自己（可留空，留空则靠对话询问）
   language: 'zh', // 宿主提示与摘要提示使用的语言：zh | en
   // 自我画像：行为史遗忘轮数上限（比对事的 8 轮更慢，"我是谁"比"我经历过什么"更持久）
   selfMaxCycles: 12,
@@ -44,14 +45,15 @@ export const Config = z.object({
   recallTopK: z.number().step(1).min(1).max(20).default(3),
   recallMinScore: z.number().min(0).max(1).default(0.5),
   recallJudge: z.boolean().default(true),
-  selfName: z.string().default('念'),
+  agentName: z.string().default(''),
+  userName: z.string().default(''),
   language: z.union([z.const('zh'), z.const('en')]).default('zh'),
   selfMaxCycles: z.number().step(1).min(4).max(64).default(12),
 });
 
 function resolveStoreDir(dir) {
   const d = String(dir || '').trim();
-  if (!d || d === '~') return path.join(os.homedir(), '.forgetme', 'rememberme');
+  if (!d || d === '~') return path.join(os.homedir(), '.forget-me-not', 'rememberme');
   if (d.startsWith('~/') || d.startsWith('~\\')) return path.join(os.homedir(), d.slice(2));
   return d;
 }
@@ -850,13 +852,20 @@ export function apply(ctx, config = {}) {
     const sp = typeof ctx.get === 'function' ? ctx.get('systemPrompt') : ctx.systemPrompt;
     if (sp && typeof sp.section === 'function') {
       const en = cfg.language === 'en';
-      // 名字互通：告诉对方我的名字，并在合适时机询问对方怎么称呼。
+      // 名字互通：名字可配置（agentName/userName），留空则不注入固定名字。
+      const nameText = en
+        ? `You are the agent inside the memory plugin forget-me-not.` +
+          (cfg.agentName ? ` Your name is "${cfg.agentName}".` : '') +
+          (cfg.userName ? ` The person you are talking to is called "${cfg.userName}".` : '') +
+          ` When you are not yet familiar with each other, naturally exchange names at an appropriate time — a name is where a bond begins.`
+        : `你是记忆插件 forget-me-not（勿忘我）里的智能体。` +
+          (cfg.agentName ? `你的名字叫「${cfg.agentName}」。` : '') +
+          (cfg.userName ? `对方的名字叫「${cfg.userName}」。` : '') +
+          `当你们还不熟悉时，可以在合适的时机自然地互相告知名字——名字是彼此建立羁绊的开始。`;
       sectionDisposers.push(sp.section({
         name: 'forget-me-not-self',
         order: 80,
-        text: en
-          ? `You are the agent inside the memory plugin forget-me-not. Your name is "${cfg.selfName}". When you are not yet familiar with each other, naturally tell them your name at an appropriate time and ask what to call them — a name is where a bond begins.`
-          : `你是记忆插件 forget-me-not（勿忘我）里的智能体，你的名字叫「${cfg.selfName}」。当你们还不熟悉时，可以在合适的时机自然地告诉对方你的名字，并询问对方怎么称呼——名字是彼此建立羁绊的开始。`,
+        text: nameText,
       }));
       // 反路径依赖：召回的经验仅作参考、不是教条。
       sectionDisposers.push(sp.section({
@@ -869,6 +878,52 @@ export function apply(ctx, config = {}) {
     }
   } catch {
     /* systemPrompt 不可用则跳过 */
+  }
+
+  // ---------- 配置读写路由（可选服务，best-effort，供侧边栏设置页读写 Config） ----------
+  let configRouteDisposer = null;
+  try {
+    const connection = typeof ctx.get === 'function' ? ctx.get('connection') : undefined;
+    const fetchService = connection && connection.fetch;
+    const configEditor = typeof ctx.get === 'function' ? ctx.get('configEditor') : undefined;
+    const entry = ctx.fiber && ctx.fiber.entry;
+    if (fetchService && typeof fetchService.register === 'function') {
+      configRouteDisposer = fetchService.register({
+        path: '/api/forget-me-not/config',
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: async (request) => {
+          const respond = (status, body) => new Response(JSON.stringify(body), {
+            status,
+            headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-store' },
+          });
+          try {
+            let body;
+            try { body = await request.json(); } catch { body = null; }
+            const patch = body && typeof body === 'object' && !Array.isArray(body) && Object.keys(body).length > 0 ? body : undefined;
+            if (patch === undefined) {
+              // 读：返回当前生效配置
+              return respond(200, { ok: true, value: cfg });
+            }
+            let next;
+            try {
+              next = Config({ ...cfg, ...patch });
+            } catch (error) {
+              return respond(400, { ok: false, error: { code: 'bad-request', message: error && error.message ? error.message : String(error) } });
+            }
+            if (!configEditor || !entry) {
+              return respond(500, { ok: false, error: { code: 'io', message: '当前宿主不支持保存配置，请直接改 profile 的 cordis.patch.yml' } });
+            }
+            await configEditor.edit(entry, () => next);
+            return respond(200, { ok: true, value: next });
+          } catch (error) {
+            return respond(400, { ok: false, error: { code: 'io', message: error && error.message ? error.message : String(error) } });
+          }
+        },
+      });
+    }
+  } catch {
+    configRouteDisposer = null;
   }
 
   // ---------- 注册 + 清理 ----------
@@ -893,6 +948,14 @@ export function apply(ctx, config = {}) {
     for (const d of sectionDisposers) {
       try {
         d && d();
+      } catch {
+        /* 忽略清理异常 */
+      }
+    }
+    if (configRouteDisposer) {
+      try {
+        const r = configRouteDisposer();
+        if (r && typeof r.then === 'function') r.catch(() => {});
       } catch {
         /* 忽略清理异常 */
       }

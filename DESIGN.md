@@ -219,7 +219,7 @@ forgetme/
 - ✅ 召回强化：改为「旧内容 + 新体会重写进当前会话」，替代 cycle -1。
 - ✅ 笔记本上限：取消，不设上限。
 - ✅ 分类表：暂时 5 类，由我在使用中主导增删。
-- ✅ **存储目录默认值**：`~/.forgetme/rememberme/`（⚙️ 可配置 `storeDir`），记忆数据独立于 GitHub 代码、防误提交泄露。Windows 下即 `C:\Users\<用户>\.forgetme\rememberme\`。
+- ✅ **存储目录默认值**：`~/.forget-me-not/rememberme/`（⚙️ 可配置 `storeDir`），记忆数据独立于 GitHub 代码、防误提交泄露。Windows 下即 `C:\Users\<用户>\.forget-me-not\rememberme\`。
 
 ---
 
