@@ -3,7 +3,7 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react');
     const h = React.createElement;
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
 
     const NS = 'forget-me-not';
     const PANEL_ID = 'forget-me-not';
@@ -11,8 +11,8 @@ window.__ModuleLoader__.load({
 
     const zh = {
       nav: '勿忘我',
-      title: '勿忘我 · forget-me-not',
-      desc: '人类遗忘式记忆插件：把每次会话按时间顺序提取成「印象」，随遗忘时钟逐轮淡忘（8 轮后彻底遗忘），用本地向量召回唤起旧记忆（仅供参考、不迷信），并可把刻骨铭心的东西写进「笔记本」。',
+      settings: '设置',
+      subtitle: '勿忘我 · forget-me-not',
       fieldAgentName: 'AI 的名字（你的智能体叫什么）',
       fieldUserName: '你的名字（怎么称呼你）',
       fieldLanguage: '语言',
@@ -30,8 +30,8 @@ window.__ModuleLoader__.load({
     };
     const en = {
       nav: 'forget-me-not',
-      title: 'forget-me-not',
-      desc: 'A human-forgetting memory plugin: each session is distilled into an impression and faded on a clock (8 rounds, then forgotten), recalled by local vector search (reference, not dogma), with a notebook for what you never want to lose.',
+      settings: 'Settings',
+      subtitle: 'forget-me-not · 勿忘我',
       fieldAgentName: "AI's name (what to call your agent)",
       fieldUserName: 'Your name (what to call you)',
       fieldLanguage: 'Language',
@@ -69,7 +69,7 @@ window.__ModuleLoader__.load({
       }, petals, h('circle', { cx: 32, cy: 32, r: 5.5, fill: '#f2c14e' }));
     }
 
-    const labelStyle = {
+    const fieldStyle = {
       display: 'flex',
       flexDirection: 'column',
       gap: '6px',
@@ -77,7 +77,7 @@ window.__ModuleLoader__.load({
       fontSize: '13px',
       color: 'var(--dsw-alias-text-secondary, inherit)',
     };
-    const controlStyle = {
+    const inputStyle = {
       boxSizing: 'border-box',
       width: '100%',
       maxWidth: '420px',
@@ -88,6 +88,82 @@ window.__ModuleLoader__.load({
       background: 'var(--dsw-alias-bg-input, transparent)',
       color: 'var(--dsw-alias-text-primary, inherit)',
     };
+
+    // 自绘下拉：整个内容框都是点击热区（原生 select 在部分主题里只有箭头附近可点）。
+    function Dropdown({ value, options, onChange }) {
+      const [open, setOpen] = useState(false);
+      const ref = useRef(null);
+
+      useEffect(() => {
+        if (!open) return;
+        const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', onDoc);
+        return () => document.removeEventListener('mousedown', onDoc);
+      }, [open]);
+
+      const current = options.find((o) => o.value === value) || options[0];
+      const triggerStyle = {
+        boxSizing: 'border-box',
+        width: '100%',
+        maxWidth: '420px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '8px 10px',
+        fontSize: '14px',
+        borderRadius: '6px',
+        border: '1px solid var(--dsw-alias-border, rgba(128,128,128,0.35))',
+        background: 'var(--dsw-alias-bg-input, transparent)',
+        color: 'var(--dsw-alias-text-primary, inherit)',
+        cursor: 'pointer',
+        userSelect: 'none',
+      };
+      const menuStyle = {
+        position: 'absolute',
+        top: 'calc(100% + 4px)',
+        left: 0,
+        right: 0,
+        maxWidth: '420px',
+        background: 'var(--dsw-alias-bg-elevated, #ffffff)',
+        border: '1px solid var(--dsw-alias-border, rgba(128,128,128,0.35))',
+        borderRadius: '6px',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+        zIndex: 20,
+        maxHeight: '220px',
+        overflowY: 'auto',
+        margin: 0,
+        padding: 0,
+      };
+      const optionStyle = (active) => ({
+        padding: '8px 10px',
+        cursor: 'pointer',
+        fontSize: '14px',
+        color: 'var(--dsw-alias-text-primary, inherit)',
+        background: active ? 'var(--dsw-alias-bg-hover, rgba(0,0,0,0.06))' : 'transparent',
+      });
+
+      return h('div', { ref, style: { position: 'relative', width: '100%', maxWidth: '420px' } },
+        h('button', {
+          type: 'button',
+          onClick: () => setOpen(!open),
+          'aria-haspopup': 'listbox',
+          'aria-expanded': open,
+          style: triggerStyle,
+        },
+          h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, current.label),
+          h('span', { 'aria-hidden': true, style: { marginLeft: '10px', fontSize: '11px', color: 'var(--dsw-alias-text-tertiary, inherit)' } }, '▾')
+        ),
+        open ? h('div', { role: 'listbox', style: menuStyle },
+          options.map((o) => h('div', {
+            key: o.value,
+            role: 'option',
+            'aria-selected': o.value === value,
+            onClick: () => { onChange(o.value); setOpen(false); },
+            style: optionStyle(o.value === value),
+          }, o.label))
+        ) : null
+      );
+    }
 
     function ConfigForm({ t }) {
       const [config, setConfig] = useState(null);
@@ -139,27 +215,35 @@ window.__ModuleLoader__.load({
         : 'var(--dsw-alias-danger, #c0392b)';
 
       return h('div', { style: { maxWidth: '480px' } },
-        h('label', { style: labelStyle },
-          t('fieldAgentName'),
-          h('input', { type: 'text', value: d.agentName || '', onChange: set('agentName'), placeholder: t('placeholderEmpty'), style: controlStyle })
+        h('div', { style: fieldStyle },
+          h('span', null, t('fieldAgentName')),
+          h('input', { type: 'text', value: d.agentName || '', onChange: set('agentName'), placeholder: t('placeholderEmpty'), style: inputStyle })
         ),
-        h('label', { style: labelStyle },
-          t('fieldUserName'),
-          h('input', { type: 'text', value: d.userName || '', onChange: set('userName'), placeholder: t('placeholderEmpty'), style: controlStyle })
+        h('div', { style: fieldStyle },
+          h('span', null, t('fieldUserName')),
+          h('input', { type: 'text', value: d.userName || '', onChange: set('userName'), placeholder: t('placeholderEmpty'), style: inputStyle })
         ),
-        h('label', { style: labelStyle },
-          t('fieldLanguage'),
-          h('select', { value: d.language || 'zh', onChange: set('language'), style: controlStyle },
-            h('option', { value: 'zh' }, t('langZh')),
-            h('option', { value: 'en' }, t('langEn'))
-          )
+        h('div', { style: fieldStyle },
+          h('span', null, t('fieldLanguage')),
+          h(Dropdown, {
+            value: d.language || 'zh',
+            onChange: (v) => setDraft(Object.assign({}, d, { language: v })),
+            options: [
+              { value: 'zh', label: t('langZh') },
+              { value: 'en', label: t('langEn') },
+            ],
+          })
         ),
-        h('label', { style: labelStyle },
-          t('fieldEmbedModel'),
-          h('select', { value: d.embedModel || 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', onChange: set('embedModel'), style: controlStyle },
-            h('option', { value: 'Xenova/all-MiniLM-L6-v2' }, t('modelLight')),
-            h('option', { value: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2' }, t('modelFull'))
-          )
+        h('div', { style: fieldStyle },
+          h('span', null, t('fieldEmbedModel')),
+          h(Dropdown, {
+            value: d.embedModel || 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+            onChange: (v) => setDraft(Object.assign({}, d, { embedModel: v })),
+            options: [
+              { value: 'Xenova/all-MiniLM-L6-v2', label: t('modelLight') },
+              { value: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', label: t('modelFull') },
+            ],
+          })
         ),
         h('p', { style: { margin: '0 0 12px', fontSize: '12px', color: 'var(--dsw-alias-text-tertiary, inherit)' } }, t('hintEmptyName')),
         h('button', {
@@ -190,8 +274,8 @@ window.__ModuleLoader__.load({
           color: 'var(--dsw-alias-text-primary, inherit)',
         },
       },
-        h('h2', { style: { margin: '0 0 12px', fontSize: '20px', fontWeight: 600 } }, t('title')),
-        h('p', { style: { margin: '0 0 20px', fontSize: '14px', lineHeight: 1.8, color: 'var(--dsw-alias-text-secondary, inherit)' } }, t('desc')),
+        h('h2', { style: { margin: '0 0 4px', fontSize: '22px', fontWeight: 700 } }, t('settings')),
+        h('p', { style: { margin: '0 0 20px', fontSize: '13px', color: 'var(--dsw-alias-text-tertiary, inherit)' } }, t('subtitle')),
         h(ConfigForm, { t })
       );
     }

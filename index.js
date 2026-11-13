@@ -4,7 +4,7 @@ import nodeFs from 'node:fs';
 import z from '@deepseek-ai/schemastery';
 
 // 本插件硬依赖的服务（缺失则不激活）。
-export const inject = ['sessions', 'llm', 'tools'];
+export const inject = ['sessions', 'llm', 'tools', 'connection'];
 
 // 可调默认值；Config schema 让它们能在 cordis.patch.yml / UI 里改。
 const DEFAULTS = {
@@ -679,7 +679,7 @@ export function apply(ctx, config = {}) {
     parameters: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: '这个人的称呼（如 mui）' },
+        name: { type: 'string', description: '这个人的称呼（例如：小明）' },
         text: { type: 'string', description: '对这个人值得记下的印象/观察' },
         category: { type: 'string', description: '可选：偏好/性格/习惯/关系/其他，默认「通用」' },
       },
@@ -885,8 +885,6 @@ export function apply(ctx, config = {}) {
   try {
     const connection = typeof ctx.get === 'function' ? ctx.get('connection') : undefined;
     const fetchService = connection && connection.fetch;
-    const configEditor = typeof ctx.get === 'function' ? ctx.get('configEditor') : undefined;
-    const entry = ctx.fiber && ctx.fiber.entry;
     if (fetchService && typeof fetchService.register === 'function') {
       configRouteDisposer = fetchService.register({
         path: '/api/forget-me-not/config',
@@ -911,6 +909,9 @@ export function apply(ctx, config = {}) {
             } catch (error) {
               return respond(400, { ok: false, error: { code: 'bad-request', message: error && error.message ? error.message : String(error) } });
             }
+            // 惰性取 configEditor/entry：写入时才需要，避免 apply 阶段服务尚未就绪导致 route 静默未注册
+            const configEditor = typeof ctx.get === 'function' ? ctx.get('configEditor') : undefined;
+            const entry = ctx.fiber && ctx.fiber.entry;
             if (!configEditor || !entry) {
               return respond(500, { ok: false, error: { code: 'io', message: '当前宿主不支持保存配置，请直接改 profile 的 cordis.patch.yml' } });
             }
